@@ -25,6 +25,9 @@ export function TopNav() {
       </span>
 
       <div className="ml-auto flex items-center gap-3">
+        <Link href="/settings" className="text-sm font-medium underline" style={{ color: "var(--pc-text-secondary)" }}>
+          Settings
+        </Link>
         <Link href="/about" className="text-sm font-medium underline" style={{ color: "var(--pc-text-secondary)" }}>
           About
         </Link>

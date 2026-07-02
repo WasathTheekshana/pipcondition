@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import { immer } from "zustand/middleware/immer";
 import { castDraft } from "immer";
 import { createBrowserVfs, resolvePipeline } from "@/lib/template";
@@ -93,141 +94,177 @@ interface PipelineState {
   setStepOutput: (stepId: string, varName: string, value: string) => void;
   removeStepOutput: (stepId: string, varName: string) => void;
   toggleStageExcluded: (stageId: string) => void;
+  /** Wipes all saved files and mock run configuration from localStorage and resets to the built-in demo pipeline. */
+  clearAllData: () => Promise<void>;
 }
 
 export const usePipelineStore = create<PipelineState>()(
-  immer((set) => ({
-    files: { [ENTRY_FILE_NAME]: DEFAULT_YAML },
-    entryPath: ENTRY_FILE_NAME,
-    activeFilePath: ENTRY_FILE_NAME,
-    hasImportedFiles: false,
+  persist(
+    immer((set) => ({
+      files: { [ENTRY_FILE_NAME]: DEFAULT_YAML },
+      entryPath: ENTRY_FILE_NAME,
+      activeFilePath: ENTRY_FILE_NAME,
+      hasImportedFiles: false,
 
-    ir: null,
-    graph: null,
-    report: null,
-    parameterDeclarations: [],
-    templateDiagnostics: [],
-    dagDiagnostics: [],
-    parseError: null,
-    isResolving: false,
+      ir: null,
+      graph: null,
+      report: null,
+      parameterDeclarations: [],
+      templateDiagnostics: [],
+      dagDiagnostics: [],
+      parseError: null,
+      isResolving: false,
 
-    variables: {},
-    parameters: {},
-    outcomeOverrides: {},
-    stepOutputs: {},
-    excludedStages: [],
+      variables: {},
+      parameters: {},
+      outcomeOverrides: {},
+      stepOutputs: {},
+      excludedStages: [],
 
-    initialize: async () => {
-      await resolveAndRecompute();
-    },
+      initialize: async () => {
+        await resolveAndRecompute();
+      },
 
-    setFileContent: async (path, text) => {
-      set((state) => {
-        state.files[path] = text;
-      });
-      await resolveAndRecompute();
-    },
+      setFileContent: async (path, text) => {
+        set((state) => {
+          state.files[path] = text;
+        });
+        await resolveAndRecompute();
+      },
 
-    addFiles: async (newFiles) => {
-      set((state) => {
-        const isFirstImport = !state.hasImportedFiles;
-        if (isFirstImport) {
-          // Replace the built-in demo entirely rather than merging alongside it.
-          state.files = castDraft(newFiles) as Record<string, string>;
-          state.hasImportedFiles = true;
-        } else {
-          for (const [path, content] of Object.entries(newFiles)) {
-            state.files[path] = content;
+      addFiles: async (newFiles) => {
+        set((state) => {
+          const isFirstImport = !state.hasImportedFiles;
+          if (isFirstImport) {
+            // Replace the built-in demo entirely rather than merging alongside it.
+            state.files = castDraft(newFiles) as Record<string, string>;
+            state.hasImportedFiles = true;
+          } else {
+            for (const [path, content] of Object.entries(newFiles)) {
+              state.files[path] = content;
+            }
           }
-        }
 
-        if (isFirstImport || !(state.entryPath in state.files)) {
-          const candidate = Object.keys(newFiles).find((p) => p.toLowerCase().endsWith(ENTRY_FILE_NAME)) ?? Object.keys(state.files)[0];
-          if (candidate) {
-            state.entryPath = candidate;
-            state.activeFilePath = candidate;
+          if (isFirstImport || !(state.entryPath in state.files)) {
+            const candidate = Object.keys(newFiles).find((p) => p.toLowerCase().endsWith(ENTRY_FILE_NAME)) ?? Object.keys(state.files)[0];
+            if (candidate) {
+              state.entryPath = candidate;
+              state.activeFilePath = candidate;
+            }
           }
-        }
-      });
-      await resolveAndRecompute();
-    },
+        });
+        await resolveAndRecompute();
+      },
 
-    removeFile: async (path) => {
-      set((state) => {
-        delete state.files[path];
-        const remaining = Object.keys(state.files);
-        if (state.entryPath === path) state.entryPath = remaining[0] ?? "";
-        if (state.activeFilePath === path) state.activeFilePath = remaining[0] ?? "";
-      });
-      await resolveAndRecompute();
-    },
+      removeFile: async (path) => {
+        set((state) => {
+          delete state.files[path];
+          const remaining = Object.keys(state.files);
+          if (state.entryPath === path) state.entryPath = remaining[0] ?? "";
+          if (state.activeFilePath === path) state.activeFilePath = remaining[0] ?? "";
+        });
+        await resolveAndRecompute();
+      },
 
-    setEntryPath: async (path) => {
-      set((state) => {
-        state.entryPath = path;
-      });
-      await resolveAndRecompute();
-    },
+      setEntryPath: async (path) => {
+        set((state) => {
+          state.entryPath = path;
+        });
+        await resolveAndRecompute();
+      },
 
-    setActiveFilePath: (path) => {
-      set((state) => {
-        state.activeFilePath = path;
-      });
-    },
+      setActiveFilePath: (path) => {
+        set((state) => {
+          state.activeFilePath = path;
+        });
+      },
 
-    setVariable: async (name, value) => {
-      set((state) => {
-        state.variables[name] = value;
-      });
-      await resolveAndRecompute();
-    },
+      setVariable: async (name, value) => {
+        set((state) => {
+          state.variables[name] = value;
+        });
+        await resolveAndRecompute();
+      },
 
-    removeVariable: async (name) => {
-      set((state) => {
-        delete state.variables[name];
-      });
-      await resolveAndRecompute();
-    },
+      removeVariable: async (name) => {
+        set((state) => {
+          delete state.variables[name];
+        });
+        await resolveAndRecompute();
+      },
 
-    setParameter: async (name, value) => {
-      set((state) => {
-        state.parameters[name] = castDraft(value);
-      });
-      await resolveAndRecompute();
-    },
+      setParameter: async (name, value) => {
+        set((state) => {
+          state.parameters[name] = castDraft(value);
+        });
+        await resolveAndRecompute();
+      },
 
-    setOutcomeOverride: (nodeId, outcome) => {
-      set((state) => {
-        if (outcome === "inherit") delete state.outcomeOverrides[nodeId];
-        else state.outcomeOverrides[nodeId] = outcome;
-      });
-      recomputeRun();
-    },
+      setOutcomeOverride: (nodeId, outcome) => {
+        set((state) => {
+          if (outcome === "inherit") delete state.outcomeOverrides[nodeId];
+          else state.outcomeOverrides[nodeId] = outcome;
+        });
+        recomputeRun();
+      },
 
-    setStepOutput: (stepId, varName, value) => {
-      set((state) => {
-        state.stepOutputs[stepId] ??= {};
-        state.stepOutputs[stepId][varName] = value;
-      });
-      recomputeRun();
-    },
+      setStepOutput: (stepId, varName, value) => {
+        set((state) => {
+          state.stepOutputs[stepId] ??= {};
+          state.stepOutputs[stepId][varName] = value;
+        });
+        recomputeRun();
+      },
 
-    removeStepOutput: (stepId, varName) => {
-      set((state) => {
-        delete state.stepOutputs[stepId]?.[varName];
-      });
-      recomputeRun();
-    },
+      removeStepOutput: (stepId, varName) => {
+        set((state) => {
+          delete state.stepOutputs[stepId]?.[varName];
+        });
+        recomputeRun();
+      },
 
-    toggleStageExcluded: (stageId) => {
-      set((state) => {
-        const i = state.excludedStages.indexOf(stageId);
-        if (i === -1) state.excludedStages.push(stageId);
-        else state.excludedStages.splice(i, 1);
-      });
-      recomputeRun();
+      toggleStageExcluded: (stageId) => {
+        set((state) => {
+          const i = state.excludedStages.indexOf(stageId);
+          if (i === -1) state.excludedStages.push(stageId);
+          else state.excludedStages.splice(i, 1);
+        });
+        recomputeRun();
+      },
+
+      clearAllData: async () => {
+        set((state) => {
+          state.files = { [ENTRY_FILE_NAME]: DEFAULT_YAML };
+          state.entryPath = ENTRY_FILE_NAME;
+          state.activeFilePath = ENTRY_FILE_NAME;
+          state.hasImportedFiles = false;
+          state.variables = {};
+          state.parameters = {};
+          state.outcomeOverrides = {};
+          state.stepOutputs = {};
+          state.excludedStages = [];
+        });
+        await resolveAndRecompute();
+      },
+    })),
+    {
+      name: "pipcondition-storage",
+      storage: createJSONStorage(() => localStorage),
+      // Only persist the developer's actual input - files and mock run config.
+      // Derived state (ir/graph/report/diagnostics) is always recomputed fresh on load.
+      partialize: (state) => ({
+        files: state.files,
+        entryPath: state.entryPath,
+        activeFilePath: state.activeFilePath,
+        hasImportedFiles: state.hasImportedFiles,
+        variables: state.variables,
+        parameters: state.parameters,
+        outcomeOverrides: state.outcomeOverrides,
+        stepOutputs: state.stepOutputs,
+        excludedStages: state.excludedStages,
+      }),
     },
-  })),
+  ),
 );
 
 /** Variables and parameters both feed compile-time `${{ }}` template expansion as well as runtime condition evaluation, so changing either requires a full re-resolve, not just re-simulating the DAG. */

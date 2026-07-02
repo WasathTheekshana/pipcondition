@@ -20,6 +20,10 @@ export function Footer() {
       <Link href="/about" className="underline">
         About
       </Link>
+      <span className="mx-1">&middot;</span>
+      <Link href="/settings" className="underline">
+        Settings
+      </Link>
     </footer>
   );
 }
