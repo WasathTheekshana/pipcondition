@@ -1,26 +1,46 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
+  --background: #fafafa;
   --foreground: #171717;
+
+  /* Minimal palette: light, mostly monochrome, one restrained accent color */
+  --pc-header-bg: #ffffff;
+  --pc-header-border: #e5e5e5;
+  --pc-accent: #2563eb;
+  --pc-accent-dark: #1d4ed8;
+  --pc-accent-secondary: #7c3aed;
+  --pc-text: #171717;
+  --pc-text-secondary: #6b6b6b;
+  --pc-border: #e5e5e5;
+  --pc-card-bg: #ffffff;
+  --pc-canvas-bg: #fafafa;
+
+  /* Run-status palette - clean, restrained, no glow */
+  --pc-success: #16a34a;
+  --pc-success-bg: #f0fdf4;
+  --pc-failed: #dc2626;
+  --pc-failed-bg: #fef2f2;
+  --pc-warning: #d97706;
+  --pc-warning-bg: #fffbeb;
+  --pc-inprogress: #2563eb;
+  --pc-inprogress-bg: #eff6ff;
+  --pc-skipped: #9ca3af;
+  --pc-skipped-bg: #f4f4f5;
+  --pc-canceled: #6b7280;
+  --pc-canceled-bg: #f4f4f5;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-display), "Space Grotesk", sans-serif;
+  --font-display: var(--font-display), "Space Grotesk", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-display), "Space Grotesk", sans-serif;
 }
