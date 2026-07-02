@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { TopNav } from "./TopNav";
 import { Footer } from "./Footer";
+import { WelcomeGuide } from "@/components/onboarding/WelcomeGuide";
 
 export function AppShell({ children }: { readonly children: ReactNode }) {
   return (
@@ -10,6 +11,7 @@ export function AppShell({ children }: { readonly children: ReactNode }) {
         {children}
       </main>
       <Footer />
+      <WelcomeGuide />
     </div>
   );
 }

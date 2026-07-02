@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePipelineStore } from "@/store/pipeline.store";
 import { useUiStore } from "@/store/ui.store";
+import { useOnboardingStore } from "@/store/onboarding.store";
 import { ArrowLeftIcon } from "@/components/chrome/BrandIcons";
 
 export default function SettingsPage() {
@@ -12,6 +13,7 @@ export default function SettingsPage() {
   const parameters = usePipelineStore((s) => s.parameters);
   const outcomeOverrides = usePipelineStore((s) => s.outcomeOverrides);
   const clearAllData = usePipelineStore((s) => s.clearAllData);
+  const openWelcome = useOnboardingStore((s) => s.openWelcome);
 
   const [confirming, setConfirming] = useState(false);
   const [cleared, setCleared] = useState(false);
@@ -63,6 +65,23 @@ export default function SettingsPage() {
             <strong style={{ color: "var(--pc-text)" }}>{overrideCount}</strong> mock outcome override{overrideCount === 1 ? "" : "s"}
           </li>
         </ul>
+      </section>
+
+      <section className="rounded-xl border p-6" style={{ borderColor: "var(--pc-border)", background: "var(--pc-card-bg)" }}>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide" style={{ color: "var(--pc-text-secondary)" }}>
+          Help
+        </h2>
+        <p className="mb-4 text-sm leading-relaxed" style={{ color: "var(--pc-text)" }}>
+          Want a refresher on how pipcondition works?
+        </p>
+        <button
+          type="button"
+          onClick={() => openWelcome()}
+          className="rounded-full border px-4 py-1.5 text-sm font-semibold"
+          style={{ borderColor: "var(--pc-accent)", color: "var(--pc-accent)" }}
+        >
+          Re-watch welcome guide
+        </button>
       </section>
 
       <section className="rounded-xl border p-6" style={{ borderColor: "var(--pc-failed)", background: "var(--pc-failed-bg)" }}>
