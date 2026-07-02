@@ -8,7 +8,9 @@
 
 [![CI/CD](https://github.com/WasathTheekshana/pipcondition/actions/workflows/ci.yaml/badge.svg)](https://github.com/WasathTheekshana/pipcondition/actions/workflows/ci.yaml)
 &nbsp;
-<img src="https://img.shields.io/badge/Tests-159%20passing-16a34a?style=flat-square&labelColor=171717" alt="159 tests passing" />
+[![Test](https://github.com/WasathTheekshana/pipcondition/actions/workflows/test.yaml/badge.svg)](https://github.com/WasathTheekshana/pipcondition/actions/workflows/test.yaml)
+&nbsp;
+<a href="https://pipcondition.vercel.app"><img src="https://img.shields.io/badge/Live%20Demo-pipcondition.vercel.app-2563eb?style=flat-square&labelColor=171717" alt="Live Demo" /></a>
 &nbsp;
 <img src="https://img.shields.io/badge/License-MIT-2563eb?style=flat-square&labelColor=171717" alt="MIT License" />
 
