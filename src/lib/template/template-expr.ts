@@ -29,6 +29,17 @@ function resolveScopedProperty(path: readonly PropertyPathSegment[], scope: Temp
   if (!(root.name in scope)) {
     throw new ExpressionError(`Unknown template variable '${root.name}'`, span);
   }
+
+  // Azure variables are always flat strings, and an unset one resolves to ""
+  // rather than erroring - real pipelines constantly reference built-in
+  // variables (Build.SourceBranch, Build.Reason, ...) inside ${{ if }}
+  // blocks that a user testing locally hasn't (and typically wouldn't)
+  // mock every single one of. Matches the same leniency the runtime
+  // condition engine already applies (see property-resolution.ts).
+  if (root.name.toLowerCase() === "variables") {
+    return resolveVariableProperty(scope[root.name], rest, scope, span);
+  }
+
   let current: RuntimeValue = scope[root.name];
   const traversed = [root.name];
   for (const seg of rest) {
@@ -44,6 +55,17 @@ function resolveScopedProperty(path: readonly PropertyPathSegment[], scope: Temp
     current = next;
   }
   return current;
+}
+
+function resolveVariableProperty(variablesValue: RuntimeValue, rest: readonly PropertyPathSegment[], scope: TemplateScope, span: Span): RuntimeValue {
+  if (rest.length !== 1) {
+    throw new ExpressionError("variables must be accessed as variables['Name'] or variables.name", span);
+  }
+  const seg = rest[0];
+  const key = seg.kind === "identifier" ? seg.name : castToKeyString(evalNode(seg.expr, scope));
+  const varsObj = (variablesValue && typeof variablesValue === "object" ? variablesValue : {}) as Record<string, RuntimeValue>;
+  const match = Object.keys(varsObj).find((k) => k.toLowerCase() === key.toLowerCase());
+  return match === undefined ? "" : varsObj[match];
 }
 
 function castToKeyString(v: RuntimeValue): string {

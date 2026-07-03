@@ -228,6 +228,31 @@ stages:
     const { parameterDeclarations } = await resolvePipeline("azure-pipelines.yml", vfs);
     expect(parameterDeclarations).toEqual([]);
   });
+
+  // Regression: `resolvedParameters` (declared defaults merged with overrides)
+  // is what the DAG engine uses for runtime `condition:` evaluation. Without
+  // it, a condition referencing a parameter the user never touched in the
+  // "Run parameters" UI would throw "unknown parameter" despite it having a
+  // perfectly valid default.
+  it("exposes resolvedParameters with declared defaults filled in, even when nothing was overridden", async () => {
+    const vfs = createBrowserVfs({
+      "azure-pipelines.yml": `
+parameters:
+  - name: runTests
+    type: boolean
+    default: true
+  - name: tags
+    type: object
+    default: [a, b]
+stages:
+  - stage: Build
+    jobs: [{ job: J, steps: [{ script: echo }] }]
+`,
+    });
+
+    const { resolvedParameters } = await resolvePipeline("azure-pipelines.yml", vfs);
+    expect(resolvedParameters).toEqual({ runTests: true, tags: ["a", "b"] });
+  });
 });
 
 describe("resolvePipeline: ${{ if }} controlling which stages/steps exist", () => {
@@ -252,5 +277,130 @@ stages:
 
     const withoutTests = await resolvePipeline("azure-pipelines.yml", vfs, { parameters: { runTests: false } });
     expect(withoutTests.ir.stages.map((s) => s.name)).toEqual(["Build"]);
+  });
+});
+
+// Regression coverage for a real enterprise pipeline pattern that used to
+// throw entirely: array-form `variables:` with a conditional pool selection,
+// a variable group reference, and root-level variables cascading to stages.
+describe("resolvePipeline: array-form variables (real-world pattern)", () => {
+  it("resolves name/value variable list items, including inside ${{ if/elseif/else }} branches", async () => {
+    const vfs = createBrowserVfs({
+      "azure-pipelines.yml": `
+variables:
+  - name: dotnetVersion
+    value: "10.0.x"
+  - group: finance-devops
+
+stages:
+  - stage: build
+    variables:
+      - \${{ if eq(variables['Build.SourceBranch'], 'refs/heads/main') }}:
+          - name: pool
+            value: "PROD-POOL"
+      - \${{ else }}:
+          - name: pool
+            value: "DEV-POOL"
+    jobs:
+      - job: J
+        steps:
+          - script: echo hi
+`,
+    });
+
+    const { ir, diagnostics } = await resolvePipeline("azure-pipelines.yml", vfs, { variables: { "Build.SourceBranch": "refs/heads/main" } });
+    expect(diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    // root-level variable cascades down, plus the chosen ${{ if }} branch's variable
+    expect(ir.stages[0].variables).toEqual({ dotnetVersion: "10.0.x", pool: "PROD-POOL" });
+    // an unresolvable variable group produces a warning, not a crash
+    expect(diagnostics.some((d) => d.severity === "warning" && /Variable group 'finance-devops'/.test(d.message))).toBe(true);
+  });
+
+  it("cascades root-level variables to every stage, with each stage's own variables overriding on collision", async () => {
+    const vfs = createBrowserVfs({
+      "azure-pipelines.yml": `
+variables:
+  - name: shared
+    value: "root-value"
+  - name: overridden
+    value: "root-value"
+
+stages:
+  - stage: A
+    jobs: [{ job: J, steps: [{ script: echo }] }]
+  - stage: B
+    variables:
+      - name: overridden
+        value: "stage-value"
+    jobs: [{ job: J, steps: [{ script: echo }] }]
+`,
+    });
+
+    const { ir } = await resolvePipeline("azure-pipelines.yml", vfs);
+    expect(ir.stages[0].variables).toEqual({ shared: "root-value", overridden: "root-value" });
+    expect(ir.stages[1].variables).toEqual({ shared: "root-value", overridden: "stage-value" });
+  });
+
+  it("does not error when a ${{ if }} condition inside a variables block references an unset built-in variable", async () => {
+    const vfs = createBrowserVfs({
+      "azure-pipelines.yml": `
+stages:
+  - stage: A
+    variables:
+      - \${{ if startsWith(variables['Build.SourceBranch'], 'refs/heads/release') }}:
+          - name: pool
+            value: "RELEASE-POOL"
+      - \${{ else }}:
+          - name: pool
+            value: "DEFAULT-POOL"
+    jobs: [{ job: J, steps: [{ script: echo }] }]
+`,
+    });
+
+    // No mock value provided for Build.SourceBranch at all - must resolve to "" like real Azure, not throw.
+    const { ir, diagnostics } = await resolvePipeline("azure-pipelines.yml", vfs);
+    expect(diagnostics.filter((d) => d.severity === "error")).toEqual([]);
+    expect(ir.stages[0].variables.pool).toBe("DEFAULT-POOL");
+  });
+});
+
+// The editor uses Diagnostic.line to underline the exact source line live,
+// like a compiler - this locks in that raw YAML syntax errors (the case that
+// can actually be pinned to a precise line) carry that field.
+describe("resolvePipeline: YAML syntax errors carry a precise line number", () => {
+  it("reports a bad-indentation error with its 1-based source line", async () => {
+    const vfs = createBrowserVfs({
+      "azure-pipelines.yml": `stages:
+  - stage: Build
+    jobs:
+      - job: J
+        steps:
+          - script: echo hi
+      badly:
+     indented: true
+`,
+    });
+
+    const { diagnostics } = await resolvePipeline("azure-pipelines.yml", vfs);
+    const parseError = diagnostics.find((d) => d.severity === "error" && /Failed to parse YAML/.test(d.message));
+    expect(parseError).toBeDefined();
+    expect(parseError!.line).toBeGreaterThan(0);
+  });
+
+  it("does not attach a line number to non-syntax diagnostics", async () => {
+    const vfs = createBrowserVfs({
+      "azure-pipelines.yml": `parameters:
+  - name: env
+    type: string
+stages:
+  - stage: A
+    jobs: [{ job: J, steps: [{ script: echo }] }]
+`,
+    });
+
+    const { diagnostics } = await resolvePipeline("azure-pipelines.yml", vfs);
+    const missingParamError = diagnostics.find((d) => /Missing required parameter/.test(d.message));
+    expect(missingParamError).toBeDefined();
+    expect(missingParamError!.line).toBeUndefined();
   });
 });

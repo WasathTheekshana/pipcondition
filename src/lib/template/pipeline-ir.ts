@@ -12,6 +12,8 @@ export interface Diagnostic {
   readonly message: string;
   /** A human-readable location, e.g. "stages[0].jobs[1]" or a file path. */
   readonly path: string;
+  /** 1-based source line within `path`, when known precisely (currently only raw YAML parse errors) - lets the editor underline the exact line instead of just naming the file. */
+  readonly line?: number;
 }
 
 export interface MatrixStrategy {
@@ -71,6 +73,8 @@ export interface ResolvedPipeline {
   readonly diagnostics: readonly Diagnostic[];
   /** The entry pipeline's own declared `parameters:` - what Azure's "Run pipeline" dialog would show as runtime parameter controls. */
   readonly parameterDeclarations: readonly ParameterDeclaration[];
+  /** Declared defaults merged with any caller-provided overrides - the values `parameters.*` should resolve to at runtime (condition: expressions), not just at compile time. */
+  readonly resolvedParameters: Record<string, unknown>;
 }
 
 export const DEFAULT_CONDITION = "succeeded()";

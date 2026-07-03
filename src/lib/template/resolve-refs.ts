@@ -1,10 +1,11 @@
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, YAMLParseError } from "yaml";
 import type { RuntimeValue } from "@/lib/expr/values";
 import type { VirtualFileSystem } from "./vfs/types";
 import type { Diagnostic } from "./pipeline-ir";
 import { expandValue } from "./expand";
 import { normalizeToStages } from "./normalize";
 import { parseParameterDeclarations, resolveParameterValues, type ParameterDeclaration } from "./parameters";
+import { normalizeVariables } from "./map-to-ir";
 import { splitTemplateRef, resolveTemplatePath } from "./path-utils";
 import type { TemplateScope } from "./template-expr";
 
@@ -43,7 +44,13 @@ async function loadAndParseYaml(path: string, ctx: ResolveContext): Promise<Reco
   try {
     parsed = parseYaml(text);
   } catch (err) {
-    ctx.diagnostics.push({ severity: "error", message: `Failed to parse YAML in '${path}': ${(err as Error).message}`, path });
+    // YAMLParseError's own .message is a multi-line block with a source
+    // excerpt and a "^" caret - useful in a terminal, noisy in a diagnostics
+    // list. Keep just its first line for the message and surface the real
+    // line number separately so the editor can underline the exact spot.
+    const line = err instanceof YAMLParseError ? err.linePos?.[0]?.line : undefined;
+    const message = err instanceof Error ? err.message.split("\n")[0] : String(err);
+    ctx.diagnostics.push({ severity: "error", message: `Failed to parse YAML in '${path}': ${message}`, path, line });
     return {};
   }
   if (!isPlainObject(parsed)) {
@@ -171,16 +178,20 @@ export interface RootResolution {
   readonly stages: Record<string, unknown>[];
   /** The entry pipeline's own declared `parameters:` block - not the base template's, when `extends:` is used. */
   readonly rootParameterDeclarations: readonly ParameterDeclaration[];
+  /** Declared defaults merged with caller-provided overrides - what `parameters.*` resolves to both at compile time and, via the DAG engine, at runtime in `condition:` expressions. */
+  readonly rootParameterValues: Record<string, unknown>;
+  /** The pipeline-level `variables:` block, flattened - cascades down to every stage as a base layer. */
+  readonly pipelineVariables: Readonly<Record<string, string>>;
 }
 
-/** Resolves `extends: { template, parameters }` by delegating entirely to the base template as the pipeline's root document. Returns only the resolved stages - the base template's own declarations aren't user-facing. */
+/** Resolves `extends: { template, parameters }` by delegating entirely to the base template as the pipeline's root document. Returns the base template's stages/variables plus the *extending* file's own declarations/values, which are what's user-facing. */
 async function resolveExtends(
   path: string,
   raw: Record<string, unknown>,
   providedParams: Record<string, unknown>,
   rootVariables: Readonly<Record<string, RuntimeValue>>,
   ctx: ResolveContext,
-): Promise<Record<string, unknown>[]> {
+): Promise<RootResolution> {
   const extendsBlock = raw.extends as Record<string, unknown>;
   const templateRef = typeof extendsBlock.template === "string" ? extendsBlock.template : "";
 
@@ -193,13 +204,15 @@ async function resolveExtends(
   const { path: relPath, repoAlias } = splitTemplateRef(templateRef);
   if (repoAlias && repoAlias.toLowerCase() !== "self") {
     nestedCtx.diagnostics.push({ severity: "warning", message: `extends template '@${repoAlias}' is not resolvable in this simulator`, path });
-    return [];
+    return { stages: [], pipelineVariables: {}, rootParameterDeclarations: ownDeclarations, rootParameterValues: ownParamValues };
   }
   const resolvedPath = resolveTemplatePath(path, relPath);
-  if (!checkDepthAndCycles(resolvedPath, nestedCtx)) return [];
+  if (!checkDepthAndCycles(resolvedPath, nestedCtx)) {
+    return { stages: [], pipelineVariables: {}, rootParameterDeclarations: ownDeclarations, rootParameterValues: ownParamValues };
+  }
 
   const inner = await resolveRootDocument(resolvedPath, passedParams, rootVariables, nestedCtx);
-  return inner.stages;
+  return { stages: inner.stages, pipelineVariables: inner.pipelineVariables, rootParameterDeclarations: ownDeclarations, rootParameterValues: ownParamValues };
 }
 
 export async function resolveRootDocument(
@@ -211,8 +224,7 @@ export async function resolveRootDocument(
   const raw = await loadAndParseYaml(path, ctx);
 
   if (isPlainObject(raw.extends)) {
-    const stages = await resolveExtends(path, raw, providedParams, rootVariables, ctx);
-    return { stages, rootParameterDeclarations: parseParameterDeclarations(raw.parameters) };
+    return resolveExtends(path, raw, providedParams, rootVariables, ctx);
   }
 
   const nestedCtx = pushVisited(ctx, path);
@@ -221,7 +233,8 @@ export async function resolveRootDocument(
   const scope: TemplateScope = { parameters: asRuntimeValue(paramValues), variables: asRuntimeValue(rootVariables) };
 
   const expanded = expandValue(raw, scope) as Record<string, unknown>;
+  const pipelineVariables = normalizeVariables(expanded.variables, nestedCtx.diagnostics as Diagnostic[], path);
   const rawStages = normalizeToStages(expanded);
   const stages = await resolveStagesArray(rawStages, rootVariables, nestedCtx);
-  return { stages, rootParameterDeclarations: declarations };
+  return { stages, rootParameterDeclarations: declarations, rootParameterValues: paramValues, pipelineVariables };
 }

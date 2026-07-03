@@ -49,6 +49,15 @@ describe("string functions", () => {
     expect(evalStr("join(',', parameters.tags)", { parameters: { tags: ["a", "b", "c"] } })).toBe("a,b,c");
   });
 
+  // Regression: a list-typed parameter that ends up holding a plain string
+  // (e.g. from a UI control that incorrectly collapsed an array to one
+  // value) must throw a catchable error here rather than crash silently
+  // downstream - this is what the DAG engine/store catch and surface as a
+  // diagnostic instead of a hard crash.
+  it("join throws a catchable error when given a non-array/object value", () => {
+    expect(() => evalStr("join(',', parameters.tags)", { parameters: { tags: "not-an-array" } })).toThrow(/array or object/);
+  });
+
   it("format substitutes positional placeholders", () => {
     expect(evalStr("format('{0}-{1}', 'a', 'b')")).toBe("a-b");
   });

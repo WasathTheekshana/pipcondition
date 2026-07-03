@@ -15,14 +15,19 @@ export async function resolvePipeline(entryPath: string, vfs: VirtualFileSystem,
   const diagnostics: Diagnostic[] = [];
   const rootVariables = options.variables ?? {};
 
-  const { stages: rawStages, rootParameterDeclarations } = await resolveRootDocument(entryPath, options.parameters ?? {}, rootVariables, {
+  const {
+    stages: rawStages,
+    rootParameterDeclarations,
+    rootParameterValues,
+    pipelineVariables,
+  } = await resolveRootDocument(entryPath, options.parameters ?? {}, rootVariables, {
     vfs,
     diagnostics,
     visited: [],
   });
 
-  const stages: StageIR[] = rawStages.map((stage, i) => mapStageToIR(stage, i, diagnostics));
-  return { ir: { stages }, diagnostics, parameterDeclarations: rootParameterDeclarations };
+  const stages: StageIR[] = rawStages.map((stage, i) => mapStageToIR(stage, i, diagnostics, pipelineVariables));
+  return { ir: { stages }, diagnostics, parameterDeclarations: rootParameterDeclarations, resolvedParameters: rootParameterValues };
 }
 
 export type { PipelineIR, StageIR, JobIR, StepIR, Diagnostic, ResolvedPipeline, MatrixStrategy } from "./pipeline-ir";

@@ -67,6 +67,21 @@ export function resolveParameterValues(
     const hasProvided = Object.prototype.hasOwnProperty.call(provided, decl.name);
     let value = hasProvided ? provided[decl.name] : decl.default;
 
+    // A provided override whose shape doesn't match the declared type is
+    // treated as stale/invalid and discarded in favor of the default,
+    // rather than kept and silently breaking anything downstream that
+    // assumes the declared shape (e.g. join() on a list-typed parameter).
+    // This also self-heals persisted mock values saved by an older,
+    // buggy version of the UI that could produce the wrong shape.
+    if (hasProvided && value !== undefined && !typeMatches(decl.type, value)) {
+      diagnostics.push({
+        severity: "warning",
+        message: `Parameter '${decl.name}' override has the wrong shape for type '${decl.type}' (got ${typeof value}) - ignoring it and using the default instead`,
+        path: pathPrefix,
+      });
+      value = decl.default;
+    }
+
     if (value === undefined) {
       diagnostics.push({
         severity: "error",
@@ -76,12 +91,20 @@ export function resolveParameterValues(
       value = typeDefaultFallback(decl.type);
     }
 
-    if (decl.values && decl.values.length > 0 && !decl.values.some((allowed) => JSON.stringify(allowed) === JSON.stringify(value))) {
-      diagnostics.push({
-        severity: "error",
-        message: `Parameter '${decl.name}' value ${JSON.stringify(value)} is not one of the allowed values ${JSON.stringify(decl.values)}`,
-        path: pathPrefix,
-      });
+    if (decl.values && decl.values.length > 0) {
+      const isAllowed = (candidate: unknown) => decl.values!.some((allowed) => JSON.stringify(allowed) === JSON.stringify(candidate));
+      // A list-typed parameter's `values:` allow-list constrains each element
+      // of the array, not the array as a whole (e.g. `type: stringList` with
+      // `default: [Sanity, Regression]` against `values: [Sanity, Regression, APIM, ...]`).
+      const invalid = Array.isArray(value) ? value.filter((item) => !isAllowed(item)) : isAllowed(value) ? [] : [value];
+      if (invalid.length > 0) {
+        const subject = Array.isArray(value) ? JSON.stringify(invalid) : JSON.stringify(value);
+        diagnostics.push({
+          severity: "error",
+          message: `Parameter '${decl.name}' value ${subject} is not one of the allowed values ${JSON.stringify(decl.values)}`,
+          path: pathPrefix,
+        });
+      }
     }
 
     if (!typeMatches(decl.type, value)) {
