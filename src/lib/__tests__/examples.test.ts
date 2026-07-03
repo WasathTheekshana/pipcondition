@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EXAMPLE_PIPELINES } from "../examples";
-import { createBrowserVfs, resolvePipeline } from "../template";
+import { createBrowserVfs, resolvePipeline, type Diagnostic } from "../template";
 import { buildGraph, simulateRun } from "../dag";
 
 describe("EXAMPLE_PIPELINES", () => {
@@ -16,7 +16,7 @@ describe("EXAMPLE_PIPELINES", () => {
       expect(diagnostics.filter((d) => d.severity === "error")).toEqual([]);
       expect(ir.stages.length).toBeGreaterThan(0);
 
-      const dagDiagnostics: typeof diagnostics = [];
+      const dagDiagnostics: Diagnostic[] = [];
       const graph = buildGraph(ir, dagDiagnostics);
       expect(dagDiagnostics.filter((d) => d.severity === "error")).toEqual([]);
 
