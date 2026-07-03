@@ -1,11 +1,18 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useDropzone, type FileWithPath } from "react-dropzone";
 import { ArrowUpload16Regular } from "@fluentui/react-icons";
 import { usePipelineStore } from "@/store/pipeline.store";
-import { YamlEditor } from "./YamlEditor";
+import type { Diagnostic } from "@/lib/template";
+import { YamlEditor, type EditorDiagnostic } from "./YamlEditor";
 import { FileTreeViewer } from "./FileTreeViewer";
+import { ExamplesPanel } from "./ExamplesPanel";
+
+/** Identical warnings (e.g. the same unresolvable cross-repo template referenced by several stages) collapse to one entry. */
+function dedupeByMessage(diagnostics: readonly Diagnostic[]): Diagnostic[] {
+  return Array.from(new Map(diagnostics.map((d) => [d.message, d])).values());
+}
 
 function pathOf(file: FileWithPath): string {
   return (file.path ?? file.name).replace(/^\.?\//, "");
@@ -22,12 +29,14 @@ export function ImportPanel() {
   const setActiveFilePath = usePipelineStore((s) => s.setActiveFilePath);
 
   const parseError = usePipelineStore((s) => s.parseError);
+  const runtimeError = usePipelineStore((s) => s.runtimeError);
   const templateDiagnostics = usePipelineStore((s) => s.templateDiagnostics);
   const dagDiagnostics = usePipelineStore((s) => s.dagDiagnostics);
   const isResolving = usePipelineStore((s) => s.isResolving);
+  const [warningsHidden, setWarningsHidden] = useState(false);
 
   const errors = [...templateDiagnostics, ...dagDiagnostics].filter((d) => d.severity === "error");
-  const warnings = [...templateDiagnostics, ...dagDiagnostics].filter((d) => d.severity === "warning");
+  const warnings = useMemo(() => dedupeByMessage([...templateDiagnostics, ...dagDiagnostics].filter((d) => d.severity === "warning")), [templateDiagnostics, dagDiagnostics]);
 
   const onDrop = useCallback(
     (accepted: FileWithPath[]) => {
@@ -43,8 +52,21 @@ export function ImportPanel() {
 
   const activeContent = files[activeFilePath] ?? "";
 
+  // Only diagnostics we can pin to an exact source line (currently raw YAML
+  // parse errors) get a live inline underline in the editor - everything
+  // else still shows in the list below with a "jump to file" link.
+  const editorDiagnostics = useMemo<EditorDiagnostic[]>(
+    () =>
+      [...templateDiagnostics, ...dagDiagnostics]
+        .filter((d): d is Diagnostic & { line: number } => d.path === activeFilePath && d.line !== undefined)
+        .map((d) => ({ line: d.line, message: d.message, severity: d.severity })),
+    [templateDiagnostics, dagDiagnostics, activeFilePath],
+  );
+
   return (
     <div className="flex flex-col gap-2 p-4">
+      <ExamplesPanel />
+
       <div className="flex items-center justify-between">
         <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--pc-text-secondary)" }}>
           Pipeline files
@@ -83,7 +105,7 @@ export function ImportPanel() {
               </span>
             )}
           </div>
-          <YamlEditor value={activeContent} onChange={(text) => void setFileContent(activeFilePath, text)} />
+          <YamlEditor value={activeContent} onChange={(text) => void setFileContent(activeFilePath, text)} diagnostics={editorDiagnostics} />
         </div>
       </div>
 
@@ -92,12 +114,26 @@ export function ImportPanel() {
           {parseError}
         </div>
       )}
+      {runtimeError && (
+        <div className="rounded border px-2 py-1.5 text-xs" style={{ borderColor: "var(--pc-failed)", background: "var(--pc-failed-bg)", color: "var(--pc-failed)" }}>
+          Simulation failed: {runtimeError}
+        </div>
+      )}
       {errors.map((d, i) => (
         <DiagnosticRow key={`e${i}`} message={d.message} path={d.path} tone="error" files={files} onJump={setActiveFilePath} />
       ))}
-      {warnings.map((d, i) => (
-        <DiagnosticRow key={`w${i}`} message={d.message} path={d.path} tone="warning" files={files} onJump={setActiveFilePath} />
-      ))}
+      {warnings.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setWarningsHidden((v) => !v)}
+          className="self-start text-xs underline"
+          style={{ color: "var(--pc-text-secondary)" }}
+        >
+          {warningsHidden ? `Show ${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : `Hide ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`}
+        </button>
+      )}
+      {!warningsHidden &&
+        warnings.map((d, i) => <DiagnosticRow key={`w${i}`} message={d.message} path={d.path} tone="warning" files={files} onJump={setActiveFilePath} />)}
     </div>
   );
 }

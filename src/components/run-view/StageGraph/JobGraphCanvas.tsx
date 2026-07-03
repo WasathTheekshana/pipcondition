@@ -1,11 +1,13 @@
 "use client";
 
 import { useMemo } from "react";
-import { ReactFlow } from "@xyflow/react";
+import { ReactFlow, Controls } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { ArrowMinimize16Regular, ArrowMaximize16Regular } from "@fluentui/react-icons";
 import type { JobVM } from "../view-model";
 import { GraphNode } from "./nodes/GraphNode";
 import { layoutDependencyGraph, type GraphItem } from "./graph-layout";
+import { useGraphFocus } from "./use-graph-focus";
 
 const nodeTypes = { graphNode: GraphNode };
 
@@ -31,10 +33,12 @@ export function JobGraphCanvas({
     return layoutDependencyGraph(items, selectedNodeId, "graphNode");
   }, [jobs, stageId, selectedNodeId]);
 
+  const { height, focused, toggle } = useGraphFocus(200, 560);
+
   if (jobs.length <= 1) return null;
 
   return (
-    <div className="w-full rounded-xl border" style={{ borderColor: "var(--pc-border)", position: "relative", width: "100%", height: 200 }}>
+    <div className="w-full rounded-xl border" style={{ borderColor: "var(--pc-border)", position: "relative", width: "100%", height }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -45,7 +49,19 @@ export function JobGraphCanvas({
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable
-      />
+      >
+        <Controls showInteractive={false} />
+      </ReactFlow>
+      <button
+        type="button"
+        title={focused ? "Collapse" : "Expand"}
+        aria-label={focused ? "Collapse job graph" : "Expand job graph"}
+        onClick={toggle}
+        className="absolute right-2 top-2 z-10 flex items-center justify-center rounded border bg-white p-1 hover:opacity-70"
+        style={{ borderColor: "var(--pc-border)", color: "var(--pc-text-secondary)" }}
+      >
+        {focused ? <ArrowMinimize16Regular /> : <ArrowMaximize16Regular />}
+      </button>
     </div>
   );
 }
