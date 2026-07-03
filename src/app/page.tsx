@@ -10,6 +10,7 @@ import { LogDrawer } from "@/components/run-view/LogPanel/LogDrawer";
 import { SkipSummary } from "@/components/run-view/SkipSummary";
 import { buildViewModel } from "@/components/run-view/view-model";
 import { RunParametersPanel } from "@/components/mock-config/RunParametersPanel";
+import { TriggerSimulatorPanel } from "@/components/mock-config/TriggerSimulatorPanel";
 import { StageSelector } from "@/components/mock-config/StageSelector";
 import { usePipelineStore } from "@/store/pipeline.store";
 import { useUiStore } from "@/store/ui.store";
@@ -44,6 +45,7 @@ export default function Home() {
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col overflow-auto">
           <ImportPanel />
+          <TriggerSimulatorPanel />
           <RunParametersPanel />
           <StageSelector stages={stages} />
 

@@ -7,10 +7,13 @@ import type { PipelineIR, Diagnostic, ParameterDeclaration } from "@/lib/templat
 import { buildGraph, simulateRun } from "@/lib/dag";
 import type { PipelineGraph, RunReport, MockOutcome } from "@/lib/dag";
 import { EXAMPLE_PIPELINES } from "@/lib/examples";
+import { deriveTriggerVariables, TRIGGER_VARIABLE_KEYS, type TriggerReason } from "@/lib/trigger-simulation";
 
 const ENTRY_FILE_NAME = "azure-pipelines.yml";
 
 export const DEFAULT_YAML = EXAMPLE_PIPELINES[0].yaml;
+
+const DEFAULT_TRIGGER = { branch: "main", reason: "Manual" as TriggerReason, targetBranch: "main" };
 
 interface PipelineState {
   /** path -> file content, the in-browser "repo" the template resolver reads from. */
@@ -41,6 +44,11 @@ interface PipelineState {
   /** Stage ids deselected via the "stages to run" picker - mirrors Azure's Run-pipeline dialog. */
   readonly excludedStages: string[];
 
+  /** The friendly branch/reason/target-branch inputs behind the derived Build.SourceBranch/Build.Reason/System.PullRequest.* entries in `variables`. */
+  readonly simulatedBranch: string;
+  readonly simulatedReason: TriggerReason;
+  readonly simulatedTargetBranch: string;
+
   /** Resolves+simulates the current file set. Call once on mount; every mutating action already re-triggers this itself. */
   initialize: () => Promise<void>;
   setFileContent: (path: string, text: string) => Promise<void>;
@@ -51,6 +59,8 @@ interface PipelineState {
   setVariable: (name: string, value: string) => Promise<void>;
   removeVariable: (name: string) => Promise<void>;
   setParameter: (name: string, value: unknown) => Promise<void>;
+  /** Updates the simulated branch push/PR trigger, deriving and setting Build.SourceBranch/Build.SourceBranchName/Build.Reason/System.PullRequest.* accordingly. */
+  setTrigger: (trigger: { branch?: string; reason?: TriggerReason; targetBranch?: string }) => Promise<void>;
   setOutcomeOverride: (nodeId: string, outcome: MockOutcome) => void;
   setStepOutput: (stepId: string, varName: string, value: string) => void;
   removeStepOutput: (stepId: string, varName: string) => void;
@@ -80,11 +90,15 @@ export const usePipelineStore = create<PipelineState>()(
       runtimeError: null,
       isResolving: false,
 
-      variables: {},
+      variables: deriveTriggerVariables(DEFAULT_TRIGGER),
       parameters: {},
       outcomeOverrides: {},
       stepOutputs: {},
       excludedStages: [],
+
+      simulatedBranch: DEFAULT_TRIGGER.branch,
+      simulatedReason: DEFAULT_TRIGGER.reason,
+      simulatedTargetBranch: DEFAULT_TRIGGER.targetBranch,
 
       initialize: async () => {
         await resolveAndRecompute();
@@ -165,6 +179,21 @@ export const usePipelineStore = create<PipelineState>()(
         await resolveAndRecompute();
       },
 
+      setTrigger: async (trigger) => {
+        set((state) => {
+          if (trigger.branch !== undefined) state.simulatedBranch = trigger.branch;
+          if (trigger.reason !== undefined) state.simulatedReason = trigger.reason;
+          if (trigger.targetBranch !== undefined) state.simulatedTargetBranch = trigger.targetBranch;
+          // Clear the full set first, not just overwrite - otherwise switching
+          // reason away from PullRequest would leave stale System.PullRequest.*
+          // values behind, since the non-PR derivation doesn't produce those keys.
+          for (const key of TRIGGER_VARIABLE_KEYS) delete state.variables[key];
+          const derived = deriveTriggerVariables({ branch: state.simulatedBranch, reason: state.simulatedReason, targetBranch: state.simulatedTargetBranch });
+          Object.assign(state.variables, derived);
+        });
+        await resolveAndRecompute();
+      },
+
       setOutcomeOverride: (nodeId, outcome) => {
         set((state) => {
           if (outcome === "inherit") delete state.outcomeOverrides[nodeId];
@@ -203,11 +232,14 @@ export const usePipelineStore = create<PipelineState>()(
           state.entryPath = ENTRY_FILE_NAME;
           state.activeFilePath = ENTRY_FILE_NAME;
           state.hasImportedFiles = false;
-          state.variables = {};
+          state.variables = deriveTriggerVariables(DEFAULT_TRIGGER);
           state.parameters = {};
           state.outcomeOverrides = {};
           state.stepOutputs = {};
           state.excludedStages = [];
+          state.simulatedBranch = DEFAULT_TRIGGER.branch;
+          state.simulatedReason = DEFAULT_TRIGGER.reason;
+          state.simulatedTargetBranch = DEFAULT_TRIGGER.targetBranch;
         });
         await resolveAndRecompute();
       },
@@ -220,11 +252,14 @@ export const usePipelineStore = create<PipelineState>()(
           state.entryPath = ENTRY_FILE_NAME;
           state.activeFilePath = ENTRY_FILE_NAME;
           state.hasImportedFiles = true;
-          state.variables = {};
+          state.variables = deriveTriggerVariables(DEFAULT_TRIGGER);
           state.parameters = {};
           state.outcomeOverrides = {};
           state.stepOutputs = {};
           state.excludedStages = [];
+          state.simulatedBranch = DEFAULT_TRIGGER.branch;
+          state.simulatedReason = DEFAULT_TRIGGER.reason;
+          state.simulatedTargetBranch = DEFAULT_TRIGGER.targetBranch;
         });
         await resolveAndRecompute();
       },
@@ -244,6 +279,9 @@ export const usePipelineStore = create<PipelineState>()(
         outcomeOverrides: state.outcomeOverrides,
         stepOutputs: state.stepOutputs,
         excludedStages: state.excludedStages,
+        simulatedBranch: state.simulatedBranch,
+        simulatedReason: state.simulatedReason,
+        simulatedTargetBranch: state.simulatedTargetBranch,
       }),
     },
   ),
