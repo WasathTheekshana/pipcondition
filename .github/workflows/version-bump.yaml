@@ -1,0 +1,76 @@
+name: Version Bump
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    name: Bump version from conventional commits
+    runs-on: ubuntu-latest
+    # The bump commit itself must NOT be skipped by CI/CD (deploy-production
+    # needs to run for it too, so the live site's version banner actually
+    # picks up the new number) - so this job guards against looping on its
+    # own release commits by message content alone, not a "[skip ci]" marker.
+    if: "!contains(github.event.head_commit.message, 'chore(release):')"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Determine version bump from pushed commits
+        id: analyze
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commits = context.payload.commits || [];
+            const rank = { patch: 1, minor: 2, major: 3 };
+            let bump = null;
+
+            for (const commit of commits) {
+              const message = commit.message;
+              const match = message.match(/^(\w+)(\([^)]*\))?(!)?:/);
+              if (!match) continue;
+
+              const type = match[1];
+              const breaking = Boolean(match[3]) || /BREAKING CHANGE:/.test(message);
+
+              let level = null;
+              if (breaking) level = "major";
+              else if (type === "feat") level = "minor";
+              else if (type === "fix" || type === "perf") level = "patch";
+
+              if (level && (!bump || rank[level] > rank[bump])) bump = level;
+            }
+
+            core.setOutput("bump", bump || "");
+
+      - name: Enable corepack
+        if: steps.analyze.outputs.bump != ''
+        run: corepack enable
+
+      - name: Setup Node.js
+        if: steps.analyze.outputs.bump != ''
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Bump package.json version
+        if: steps.analyze.outputs.bump != ''
+        id: version
+        run: |
+          npm version ${{ steps.analyze.outputs.bump }} --no-git-tag-version
+          echo "new_version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Commit and tag the version bump
+        if: steps.analyze.outputs.bump != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(release): v${{ steps.version.outputs.new_version }}"
+          git tag "v${{ steps.version.outputs.new_version }}"
+          git push origin HEAD:main
+          git push origin "v${{ steps.version.outputs.new_version }}"
