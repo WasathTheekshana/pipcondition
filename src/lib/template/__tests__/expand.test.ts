@@ -23,6 +23,17 @@ describe("whole-scalar and embedded substitution", () => {
     const input = { steps: [{ script: "deploy ${{ parameters.env }}" }] };
     expect(expandValue(input, scope)).toEqual({ steps: [{ script: "deploy prod" }] });
   });
+
+  // Regression: a string with TWO separate ${{ }} expressions used to be
+  // misdetected as one whole-scalar expression, greedily capturing from the
+  // first `${{` to the LAST `}}` (including the literal text and second
+  // expression in between) as if it were a single expression body - which
+  // then failed to parse with "Unexpected character '}'".
+  it("concatenates two or more separate ${{ }} expressions in the same string, not a single whole-scalar match", () => {
+    const scope: TemplateScope = { parameters: { environment: "prod" }, region: { name: "eastus" } };
+    expect(expandValue("${{ parameters.environment }}-${{ region.name }}", scope)).toBe("prod-eastus");
+    expect(expandValue("env: ${{ parameters.environment }}, region: ${{ region.name }}", scope)).toBe("env: prod, region: eastus");
+  });
 });
 
 describe("${{ if / elseif / else }} as mapping keys", () => {

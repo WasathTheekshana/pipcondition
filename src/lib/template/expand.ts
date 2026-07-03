@@ -14,7 +14,24 @@ const ELSEIF_RE = /^\$\{\{\s*elseif\s+([\s\S]+?)\s*\}\}$/;
 const ELSE_RE = /^\$\{\{\s*else\s*\}\}$/;
 const EACH_RE = /^\$\{\{\s*each\s+(\w+)\s+in\s+([\s\S]+?)\s*\}\}$/;
 const INSERT_RE = /^\$\{\{\s*insert\s*\}\}$/;
-const WHOLE_EXPR_RE = /^\s*\$\{\{([\s\S]+)\}\}\s*$/;
+const LEADING_EXPR_RE = /^\$\{\{([\s\S]+?)\}\}/;
+
+/**
+ * A string that is *entirely* a single `${{ }}` expression (once trimmed)
+ * gets type-preserving substitution (the result can be a number/bool/array,
+ * not just a string). Anything else - including a string with more than one
+ * `${{ }}` occurrence, e.g. '${{ parameters.environment }}-${{ region.name }}'
+ * - is plain string concatenation instead. A naive greedy `^\$\{\{(.+)\}\}$`
+ * regex would swallow the literal text and second expression between two
+ * such occurrences as if they were one expression body and fail to parse -
+ * this checks that the *first* `${{ ... }}` occurrence's closing `}}` is
+ * also the end of the string before treating it as a whole match.
+ */
+function matchSingleWholeExpr(trimmed: string): string | undefined {
+  const leading = trimmed.match(LEADING_EXPR_RE);
+  if (!leading || leading[0].length !== trimmed.length) return undefined;
+  return leading[1].trim();
+}
 const EMBEDDED_EXPR_RE = /\$\{\{([\s\S]*?)\}\}/g;
 
 function matchControlKey(key: string): ControlKey | undefined {
@@ -50,9 +67,9 @@ function expandKeyString(key: string, scope: TemplateScope): string {
 }
 
 function expandString(s: string, scope: TemplateScope): unknown {
-  const whole = s.match(WHOLE_EXPR_RE);
-  if (whole) return evaluateTemplateExpression(whole[1].trim(), scope);
   if (!s.includes("${{")) return s;
+  const whole = matchSingleWholeExpr(s.trim());
+  if (whole !== undefined) return evaluateTemplateExpression(whole, scope);
   return s.replace(EMBEDDED_EXPR_RE, (_match, inner: string) => {
     const value = evaluateTemplateExpression(inner.trim(), scope);
     const cast = castToString(value);
