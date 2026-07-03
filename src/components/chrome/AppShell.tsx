@@ -1,11 +1,13 @@
 import type { ReactNode } from "react";
 import { TopNav } from "./TopNav";
 import { Footer } from "./Footer";
+import { BetaBanner } from "./BetaBanner";
 import { WelcomeGuide } from "@/components/onboarding/WelcomeGuide";
 
 export function AppShell({ children }: { readonly children: ReactNode }) {
   return (
     <div className="flex h-screen flex-col">
+      <BetaBanner />
       <TopNav />
       <main className="min-h-0 flex-1 overflow-auto" style={{ background: "var(--pc-canvas-bg)" }}>
         {children}
