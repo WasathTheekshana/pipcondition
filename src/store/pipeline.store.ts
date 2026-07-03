@@ -6,54 +6,11 @@ import { createBrowserVfs, resolvePipeline } from "@/lib/template";
 import type { PipelineIR, Diagnostic, ParameterDeclaration } from "@/lib/template";
 import { buildGraph, simulateRun } from "@/lib/dag";
 import type { PipelineGraph, RunReport, MockOutcome } from "@/lib/dag";
+import { EXAMPLE_PIPELINES } from "@/lib/examples";
 
 const ENTRY_FILE_NAME = "azure-pipelines.yml";
 
-export const DEFAULT_YAML = `parameters:
-  - name: runTests
-    type: boolean
-    default: true
-  - name: targetEnv
-    type: string
-    default: staging
-    values:
-      - staging
-      - prod
-
-stages:
-  - stage: Build
-    jobs:
-      - job: Compile
-        steps:
-          - script: echo "building"
-            name: build_step
-
-  - stage: Test
-    dependsOn: Build
-    condition: and(eq(dependencies.Build.result, 'Succeeded'), eq(\${{ parameters.runTests }}, true))
-    jobs:
-      - job: RunTests
-        steps:
-          - script: echo "testing"
-            name: test_step
-
-  - stage: Deploy
-    dependsOn:
-      - Build
-      - Test
-    condition: |
-      and(
-        in(dependencies.Build.result, 'Succeeded', 'SucceededWithIssues'),
-        in(dependencies.Test.result, 'Succeeded', 'SucceededWithIssues', 'Skipped')
-      )
-    variables:
-      environment: \${{ parameters.targetEnv }}
-    jobs:
-      - job: Ship
-        steps:
-          - script: echo "shipping to $(environment)"
-            name: ship_step
-`;
+export const DEFAULT_YAML = EXAMPLE_PIPELINES[0].yaml;
 
 interface PipelineState {
   /** path -> file content, the in-browser "repo" the template resolver reads from. */
@@ -68,9 +25,13 @@ interface PipelineState {
   readonly graph: PipelineGraph | null;
   readonly report: RunReport | null;
   readonly parameterDeclarations: readonly ParameterDeclaration[];
+  /** Declared defaults merged with `parameters` overrides - used for runtime condition evaluation so a parameter with a default "just works" without the user touching its UI control. */
+  readonly resolvedParameters: Record<string, unknown>;
   readonly templateDiagnostics: readonly Diagnostic[];
   readonly dagDiagnostics: readonly Diagnostic[];
   readonly parseError: string | null;
+  /** Set if simulating the run itself throws (distinct from parseError, which is template/YAML resolution failing). */
+  readonly runtimeError: string | null;
   readonly isResolving: boolean;
 
   readonly variables: Record<string, string>;
@@ -96,6 +57,8 @@ interface PipelineState {
   toggleStageExcluded: (stageId: string) => void;
   /** Wipes all saved files and mock run configuration from localStorage and resets to the built-in demo pipeline. */
   clearAllData: () => Promise<void>;
+  /** Replaces the current file set with one of the bundled EXAMPLE_PIPELINES and resets mock run config, so switching examples doesn't carry over stale variable/parameter overrides. */
+  loadExample: (id: string) => Promise<void>;
 }
 
 export const usePipelineStore = create<PipelineState>()(
@@ -110,9 +73,11 @@ export const usePipelineStore = create<PipelineState>()(
       graph: null,
       report: null,
       parameterDeclarations: [],
+      resolvedParameters: {},
       templateDiagnostics: [],
       dagDiagnostics: [],
       parseError: null,
+      runtimeError: null,
       isResolving: false,
 
       variables: {},
@@ -246,6 +211,23 @@ export const usePipelineStore = create<PipelineState>()(
         });
         await resolveAndRecompute();
       },
+
+      loadExample: async (id) => {
+        const example = EXAMPLE_PIPELINES.find((e) => e.id === id);
+        if (!example) return;
+        set((state) => {
+          state.files = { [ENTRY_FILE_NAME]: example.yaml };
+          state.entryPath = ENTRY_FILE_NAME;
+          state.activeFilePath = ENTRY_FILE_NAME;
+          state.hasImportedFiles = true;
+          state.variables = {};
+          state.parameters = {};
+          state.outcomeOverrides = {};
+          state.stepOutputs = {};
+          state.excludedStages = [];
+        });
+        await resolveAndRecompute();
+      },
     })),
     {
       name: "pipcondition-storage",
@@ -280,7 +262,7 @@ async function resolveAndRecompute(): Promise<void> {
 
   try {
     const vfs = createBrowserVfs(files);
-    const { ir, diagnostics, parameterDeclarations } = await resolvePipeline(entryPath, vfs, {
+    const { ir, diagnostics, parameterDeclarations, resolvedParameters } = await resolvePipeline(entryPath, vfs, {
       variables,
       parameters,
     });
@@ -288,6 +270,7 @@ async function resolveAndRecompute(): Promise<void> {
       ir: castDraft(ir),
       templateDiagnostics: castDraft(diagnostics),
       parameterDeclarations: castDraft(parameterDeclarations),
+      resolvedParameters: castDraft(resolvedParameters),
       isResolving: false,
     });
   } catch (err) {
@@ -302,13 +285,29 @@ async function resolveAndRecompute(): Promise<void> {
 }
 
 function recomputeRun(): void {
-  const { ir, variables, parameters, outcomeOverrides, stepOutputs, excludedStages } = usePipelineStore.getState();
+  const { ir, variables, resolvedParameters, outcomeOverrides, stepOutputs, excludedStages } = usePipelineStore.getState();
   if (!ir) {
-    usePipelineStore.setState({ graph: null, report: null, dagDiagnostics: [] });
+    usePipelineStore.setState({ graph: null, report: null, dagDiagnostics: [], runtimeError: null });
     return;
   }
-  const dagDiagnostics: Diagnostic[] = [];
-  const graph = buildGraph(ir, dagDiagnostics);
-  const report = simulateRun(graph, { variables, parameters, outcomeOverrides, stepOutputs, excludedStages });
-  usePipelineStore.setState({ graph, report, dagDiagnostics });
+  try {
+    const dagDiagnostics: Diagnostic[] = [];
+    const graph = buildGraph(ir, dagDiagnostics);
+    // Use the fully-resolved parameter set (declared defaults merged with
+    // overrides), not the raw override-only `parameters` map - otherwise a
+    // condition referencing a parameter the user never touched in the UI
+    // would incorrectly throw "unknown parameter" despite it having a default.
+    const report = simulateRun(graph, { variables, parameters: resolvedParameters, outcomeOverrides, stepOutputs, excludedStages });
+    usePipelineStore.setState({ graph, report, dagDiagnostics, runtimeError: null });
+  } catch (err) {
+    // A condition expression can throw (e.g. a mock parameter/variable value
+    // of the wrong shape) - surface it as a diagnostic instead of crashing
+    // the whole app, matching how template-resolution errors are handled.
+    usePipelineStore.setState({
+      graph: null,
+      report: null,
+      dagDiagnostics: [],
+      runtimeError: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
