@@ -17,12 +17,17 @@ env:
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
 permissions:
-  # contents: write is needed by the version-bump job (pushes a commit + tag);
-  # issues: write is needed by deploy-preview's PR-comment step. Declaring
-  # this explicitly means every other scope defaults to none, so both have
-  # to be listed even though only one job each needs them.
+  # contents: write is needed by the version-bump job (pushes a commit + tag).
+  # issues: write + pull-requests: write are both needed by deploy-preview's
+  # PR-comment step - the issues/comments REST endpoint (what a PR comment
+  # actually posts to under the hood) accepted either scope per its
+  # x-accepted-github-permissions response header, but only granting
+  # issues: write still 403'd, so both are declared to be safe. Declaring
+  # any of this explicitly means every other scope defaults to none, so all
+  # three have to be listed even though only one job each needs them.
   contents: write
   issues: write
+  pull-requests: write
 
 jobs:
   lint:
