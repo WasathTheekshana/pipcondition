@@ -17,12 +17,17 @@ env:
   VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
 permissions:
-  # contents: write is needed by the version-bump job (pushes a commit + tag);
-  # issues: write is needed by deploy-preview's PR-comment step. Declaring
-  # this explicitly means every other scope defaults to none, so both have
-  # to be listed even though only one job each needs them.
+  # contents: write is needed by the version-bump job (pushes a commit + tag).
+  # issues: write + pull-requests: write are both needed by deploy-preview's
+  # PR-comment step - the issues/comments REST endpoint (what a PR comment
+  # actually posts to under the hood) accepted either scope per its
+  # x-accepted-github-permissions response header, but only granting
+  # issues: write still 403'd, so both are declared to be safe. Declaring
+  # any of this explicitly means every other scope defaults to none, so all
+  # three have to be listed even though only one job each needs them.
   contents: write
   issues: write
+  pull-requests: write
 
 jobs:
   lint:
@@ -185,7 +190,12 @@ jobs:
     name: Deploy Preview
     runs-on: ubuntu-latest
     needs: [build]
-    if: github.event_name == 'pull_request'
+    # A custom `if:` without always()/failure()/cancelled() implicitly gets
+    # `success()` prepended, which checks the WHOLE transitive dependency
+    # chain, not just this job's direct `needs: [build]` - so a skipped
+    # version-bump job (its own if: is push-only, so it's always skipped for
+    # pull_request events) silently skips this job too unless overridden here.
+    if: always() && needs.build.result == 'success' && github.event_name == 'pull_request'
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -228,7 +238,10 @@ jobs:
     name: Deploy Production
     runs-on: ubuntu-latest
     needs: [build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Same always()-override as deploy-preview above, for the same reason -
+    # version-bump's job-level skip must not silently poison this job's
+    # implicit transitive success() check.
+    if: always() && needs.build.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Checkout code
         uses: actions/checkout@v7

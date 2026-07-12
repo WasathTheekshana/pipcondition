@@ -8,6 +8,7 @@ import { buildGraph, simulateRun } from "@/lib/dag";
 import type { PipelineGraph, RunReport, MockOutcome } from "@/lib/dag";
 import { EXAMPLE_PIPELINES } from "@/lib/examples";
 import { deriveTriggerVariables, TRIGGER_VARIABLE_KEYS, type TriggerReason } from "@/lib/trigger-simulation";
+import type { SharedRunState } from "@/lib/share-link";
 
 const ENTRY_FILE_NAME = "azure-pipelines.yml";
 
@@ -69,6 +70,24 @@ interface PipelineState {
   clearAllData: () => Promise<void>;
   /** Replaces the current file set with one of the bundled EXAMPLE_PIPELINES and resets mock run config, so switching examples doesn't carry over stale variable/parameter overrides. */
   loadExample: (id: string) => Promise<void>;
+  /** Replaces the entire file set and mock run config with a shared state decoded from a share link. */
+  loadSharedState: (shared: SharedRunState) => Promise<void>;
+}
+
+/** The inverse of loadSharedState - extracts exactly the fields a share link needs to reproduce the current run, nothing derived/transient. */
+export function getShareState(state: PipelineState): SharedRunState {
+  return {
+    files: state.files,
+    entryPath: state.entryPath,
+    variables: state.variables,
+    parameters: state.parameters,
+    outcomeOverrides: state.outcomeOverrides,
+    stepOutputs: state.stepOutputs,
+    excludedStages: state.excludedStages,
+    simulatedBranch: state.simulatedBranch,
+    simulatedReason: state.simulatedReason,
+    simulatedTargetBranch: state.simulatedTargetBranch,
+  };
 }
 
 export const usePipelineStore = create<PipelineState>()(
@@ -260,6 +279,29 @@ export const usePipelineStore = create<PipelineState>()(
           state.simulatedBranch = DEFAULT_TRIGGER.branch;
           state.simulatedReason = DEFAULT_TRIGGER.reason;
           state.simulatedTargetBranch = DEFAULT_TRIGGER.targetBranch;
+        });
+        await resolveAndRecompute();
+      },
+
+      loadSharedState: async (shared) => {
+        set((state) => {
+          const files = Object.keys(shared.files).length > 0 ? castDraft(shared.files) : { [ENTRY_FILE_NAME]: DEFAULT_YAML };
+          state.files = files as Record<string, string>;
+          // A share link's entryPath could in principle point at a file that
+          // doesn't exist in its own files map (hand-crafted/corrupted link) -
+          // fall back to any available file rather than leaving entryPath
+          // dangling, which resolveAndRecompute treats as "no file selected".
+          state.entryPath = shared.entryPath in files ? shared.entryPath : Object.keys(files)[0];
+          state.activeFilePath = state.entryPath;
+          state.hasImportedFiles = true;
+          state.variables = castDraft(shared.variables);
+          state.parameters = castDraft(shared.parameters);
+          state.outcomeOverrides = castDraft(shared.outcomeOverrides);
+          state.stepOutputs = castDraft(shared.stepOutputs);
+          state.excludedStages = [...shared.excludedStages];
+          state.simulatedBranch = shared.simulatedBranch;
+          state.simulatedReason = shared.simulatedReason;
+          state.simulatedTargetBranch = shared.simulatedTargetBranch;
         });
         await resolveAndRecompute();
       },

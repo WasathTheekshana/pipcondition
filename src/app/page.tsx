@@ -14,9 +14,11 @@ import { TriggerSimulatorPanel } from "@/components/mock-config/TriggerSimulator
 import { StageSelector } from "@/components/mock-config/StageSelector";
 import { usePipelineStore } from "@/store/pipeline.store";
 import { useUiStore } from "@/store/ui.store";
+import { readShareStateFromLocation, clearShareHash } from "@/lib/share-link";
 
 export default function Home() {
   const initialize = usePipelineStore((s) => s.initialize);
+  const loadSharedState = usePipelineStore((s) => s.loadSharedState);
   const graph = usePipelineStore((s) => s.graph);
   const report = usePipelineStore((s) => s.report);
 
@@ -27,8 +29,18 @@ export default function Home() {
   const selectNode = useUiStore((s) => s.selectNode);
 
   useEffect(() => {
-    void initialize();
-  }, [initialize]);
+    // A share link's payload lives in the URL hash - if present, it takes
+    // priority over whatever's in localStorage. Loaded once and then the
+    // hash is stripped, so a reload (or further edits) doesn't keep
+    // re-hydrating over local changes, and continues from local storage as normal after that.
+    const shared = readShareStateFromLocation();
+    if (shared) {
+      clearShareHash();
+      void loadSharedState(shared);
+    } else {
+      void initialize();
+    }
+  }, [initialize, loadSharedState]);
 
   const stages = useMemo(() => (graph && report ? buildViewModel(graph, report) : []), [graph, report]);
 
